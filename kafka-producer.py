@@ -10,7 +10,7 @@ from kafka import KafkaProducer
 from util import rand_lat_long, generate_random_point
 
 producer = KafkaProducer(
-    bootstrap_servers=["localhost:9092"],
+    bootstrap_servers=["kafka:9092"],
     value_serializer=lambda x: json.dumps(x).encode("utf-8"),
 )
 

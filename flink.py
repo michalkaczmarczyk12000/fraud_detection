@@ -55,7 +55,7 @@ def main():
     kafka_source = FlinkKafkaConsumer(
         topics="Transaction",
         deserialization_schema=deserialization_schema,
-        properties={"bootstrap.servers": "localhost:9092"},
+        properties={"bootstrap.servers": "kafka:9092"},
     )
 
     ds = env.add_source(kafka_source)

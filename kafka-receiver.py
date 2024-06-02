@@ -3,7 +3,8 @@ import json
 
 consumer = KafkaConsumer(
     "Anomaly",
-    bootstrap_servers=["localhost:9092"],
+    bootstrap_servers=["kafka:9092"],
+    api_version=(0, 10),
     auto_offset_reset="earliest",
     value_deserializer=lambda x: json.loads(x.decode("utf-8")),
 )
