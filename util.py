@@ -9,14 +9,14 @@ def rand_lat_long():
     gy = random.gauss(0.0, 1.0)
     gz = random.gauss(0.0, 1.0)
 
-    norm2 = gx*gx + gy*gy + gz*gz
+    norm2 = gx * gx + gy * gy + gz * gz
     norm1 = 1.0 / math.sqrt(norm2)
     x = gx * norm1
     y = gy * norm1
     z = gz * norm1
 
     radLat = math.asin(z)
-    radLon = math.atan2(y,x)
+    radLon = math.atan2(y, x)
 
     return round(cf * radLat, 5), round(cf * radLon, 5)
 
@@ -46,9 +46,13 @@ def generate_random_point(latitude, longitude, radius):
 
 def haversine(lat1, lon1, lat2, lon2):
     from math import radians, sin, cos, sqrt, atan2
+
     R = 6371  # Radius of the Earth in km
     d_lat = radians(lat2 - lat1)
     d_lon = radians(lon2 - lon1)
-    a = sin(d_lat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    a = (
+        sin(d_lat / 2) ** 2
+        + cos(radians(lat1)) * cos(radians(lat2)) * sin(d_lon / 2) ** 2
+    )
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return R * c
