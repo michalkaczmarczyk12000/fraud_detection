@@ -43,13 +43,11 @@ class DetectLocationChange(KeyedProcessFunction):
             latitude = value["latitude"]
             longitude = value["longitude"]
             timestamp = datetime.strptime(value["timestamp"], "%Y-%m-%d %H:%M:%S")
-
-            logging.info(
-                f"Processing transaction for card_id={card_id}, user_id={user_id}"
-            )
+            print("=====[START] Location change anomaly detection started=====")
+            print(f"Processing transaction for card_id={card_id}, user_id={user_id}")
 
             last_location = self.redis_client.get(user_id)
-            
+
             if last_location:
                 last_lat, last_lon, last_timestamp_str = last_location.split(",")
                 last_lat, last_lon = float(last_lat), float(last_lon)
@@ -62,21 +60,22 @@ class DetectLocationChange(KeyedProcessFunction):
                 ).total_seconds() / 3600  # in hours
                 distance = haversine(last_lat, last_lon, latitude, longitude)
                 speed = distance / time_diff
-                print(speed)
-                logging.info(f"Calculated speed for user_id={user_id} is {speed} km/h")
+                print(f"Calculated speed for user_id={user_id} is {speed} km/h")
 
                 if (
-                    speed > 9
+                    speed > 900
                 ):  # Speed greater than 900 km/h (faster than a passenger plane)
+                    print("Anomaly detected")
                     value["anomaly"] = "High speed detected"
                     yield value
-
+            print(f"Saving last location of user {user_id}")
             self.redis_client.set(
                 user_id,
                 f"{latitude},{longitude},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
             )
+            print("=====[END] Location change anomaly detection =====")
         except Exception as e:
-            logging.error(f"Error processing element: {e}", exc_info=True)
+            print(f"Error processing element. ", e)
 
 
 class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow]):
@@ -84,10 +83,14 @@ class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow
         self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[Row]
     ) -> Iterable[Row]:
         transactions = list(elements)
+        print("=====[START] Frequent transactions anomaly detection =====")
+        print(f"Processing transactions {transactions}")
         if len(transactions) > 3:
             for transaction in transactions:
+                print("Anomaly detected")
                 transaction["anomaly"] = "High frequency of transactions"
                 yield transaction
+        print("=====[END] Frequent transactions anomaly detection =====")
 
 
 class DetectLimitBreaches(KeyedProcessFunction):
@@ -100,14 +103,17 @@ class DetectLimitBreaches(KeyedProcessFunction):
         )
 
     def process_element(self, value, ctx: "KeyedProcessFunction.Context"):
+        print("=====[START] Card limit exceeded anomaly detection =====")
         current_time = datetime.strptime(value["timestamp"], "%Y-%m-%d %H:%M:%S")
         card_id = value["card_id"]
         limit = float(value["limit"])
         value_amount = float(value["value"])
+        print(f"Processing card {card_id}, limit {limit}, value {value_amount}")
 
         self.transactions_state.put(ctx.timestamp(), value)
+        print("DEBUG0")
         ctx.timer_service().register_event_time_timer(ctx.timestamp() + 60000)
-
+        print("DEBUG1")
         over_limit_transactions = [
             trans
             for trans in self.transactions_state.values()
@@ -115,16 +121,25 @@ class DetectLimitBreaches(KeyedProcessFunction):
             and trans["timestamp"]
             > (current_time - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
         ]
-
+        print("DEBUG2")
         if len(over_limit_transactions) >= 3:
+            print("DEBUG3")
             for trans in over_limit_transactions:
+                print("Anomaly detected")
                 trans["anomaly"] = "Limit breach detected"
                 yield trans
+        print("=====[END] Card limit exceeded anomaly detection =====")
 
     def on_timer(self, timestamp, ctx: "KeyedProcessFunction.OnTimerContext"):
+        print(">On timer<")
         for ts in list(self.transactions_state.keys()):
+            print(f"Timestamp {ts}")
             if ts <= timestamp:
+                print(f"{ts} <= {timestamp} == {ts <= timestamp}")
+                transaction = self.transactions_state.get(ts)
                 self.transactions_state.remove(ts)
+                print(f"removed {ts} form transactions_state")
+                yield transaction
 
 
 def main():
@@ -202,17 +217,17 @@ def main():
 
     ds.print()
 
-    anomalies = ds.key_by(lambda row: row["card_id"]).process(
+    anomalies_location = ds.key_by(lambda row: row["card_id"]).process(
         DetectLocationChange(), output_type=output_type_info
     )
 
-    anomalies = (
-        anomalies.key_by(lambda row: row["user_id"])
+    anomalies_frequent = (
+        ds.key_by(lambda row: row["user_id"])
         .window(TumblingEventTimeWindows.of(Time.minutes(1)))
         .process(DetectFrequentTransactions(), output_type=output_type_info)
     )
 
-    anomalies = anomalies.key_by(lambda row: row["card_id"]).process(
+    anomalies_limit = ds.key_by(lambda row: row["card_id"]).process(
         DetectLimitBreaches(), output_type=output_type_info
     )
 
@@ -228,7 +243,9 @@ def main():
         producer_config={"bootstrap.servers": "kafka:9092"},
     )
 
-    anomalies.add_sink(kafka_sink)
+    anomalies_location.add_sink(kafka_sink)
+    anomalies_frequent.add_sink(kafka_sink)
+    anomalies_limit.add_sink(kafka_sink)
 
     env.execute("anomaly_detection")
 
