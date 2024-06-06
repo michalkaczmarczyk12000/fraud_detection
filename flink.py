@@ -1,9 +1,10 @@
 import logging
 import sys
-from datetime import datetime, timedelta
 from typing import Iterable
+import os
 
 import redis
+from datetime import datetime, timedelta
 from pyflink.common import Types, Row
 from pyflink.common.time import Time, Duration
 from pyflink.common.watermark_strategy import WatermarkStrategy
@@ -27,12 +28,9 @@ from util import haversine
 
 class DetectLocationChange(KeyedProcessFunction):
 
-    def __init__(self, redis_host="localhost", redis_port=6379):
-        self.redis_host = redis_host
-        self.redis_port = redis_port
-        self.redis_client = None
-
-    def open(self, runtime_context: RuntimeContext):
+    def open(self, runtime_context):
+        self.redis_host = os.getenv("REDIS_HOST", "localhost")
+        self.redis_port = int(os.getenv("REDIS_PORT", 6379))
         self.redis_client = redis.StrictRedis(
             host=self.redis_host, port=self.redis_port, decode_responses=True
         )
@@ -60,7 +58,9 @@ class DetectLocationChange(KeyedProcessFunction):
                 value["anomaly"] = "High speed detected"
                 yield value
 
-        self.redis_client.set(user_id, f"{latitude},{longitude},{value['timestamp']}")
+        self.redis_client.set(
+            user_id, f"{latitude},{longitude},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
 
 class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow]):
@@ -106,7 +106,6 @@ class DetectLimitBreaches(KeyedProcessFunction):
                 yield trans
 
     def on_timer(self, timestamp, ctx: "KeyedProcessFunction.OnTimerContext"):
-
         for ts in list(self.transactions_state.keys()):
             if ts <= timestamp:
                 self.transactions_state.remove(ts)
@@ -126,8 +125,8 @@ def main():
             Types.INT(),
             Types.DOUBLE(),
             Types.DOUBLE(),
-            Types.INT(),
-            Types.STRING(),
+            Types.DOUBLE(),
+            Types.DOUBLE(),
             Types.STRING(),
         ],
     )

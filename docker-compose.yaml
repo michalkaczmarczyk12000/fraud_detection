@@ -50,11 +50,13 @@ services:
     restart: on-failure
     depends_on:
       - kafka
+      - redis
     environment:
       KAFKA_BROKER: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     ports:
       - "5000:5000"
-
   kafdrop:
     image: obsidiandynamics/kafdrop
     depends_on:
@@ -67,8 +69,5 @@ services:
 
   redis:  
     image: redis
-    command: redis-server /usr/local/etc/redis/redis.conf
-    volumes:
-      - ./redis.conf:/usr/local/etc/redis/redis.conf
     ports:
       - "6379"
