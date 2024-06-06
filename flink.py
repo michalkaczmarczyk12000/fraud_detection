@@ -34,33 +34,49 @@ class DetectLocationChange(KeyedProcessFunction):
         self.redis_client = redis.StrictRedis(
             host=self.redis_host, port=self.redis_port, decode_responses=True
         )
+        logging.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}")
 
     def process_element(self, value, ctx: "KeyedProcessFunction.Context"):
-        card_id = value["card_id"]
-        user_id = value["user_id"]
-        latitude = value["latitude"]
-        longitude = value["longitude"]
-        timestamp = datetime.strptime(value["timestamp"], "%Y-%m-%d %H:%M:%S")
+        try:
+            card_id = value["card_id"]
+            user_id = value["user_id"]
+            latitude = value["latitude"]
+            longitude = value["longitude"]
+            timestamp = datetime.strptime(value["timestamp"], "%Y-%m-%d %H:%M:%S")
 
-        last_location = self.redis_client.get(user_id)
-        if last_location:
-            last_lat, last_lon, last_timestamp_str = last_location.split(",")
-            last_lat, last_lon = float(last_lat), float(last_lon)
-            last_timestamp = datetime.strptime(last_timestamp_str, "%Y-%m-%d %H:%M:%S")
+            logging.info(
+                f"Processing transaction for card_id={card_id}, user_id={user_id}"
+            )
 
-            time_diff = (timestamp - last_timestamp).total_seconds() / 3600  # in hours
-            distance = haversine(last_lat, last_lon, latitude, longitude)
-            speed = distance / time_diff
+            last_location = self.redis_client.get(user_id)
+            
+            if last_location:
+                last_lat, last_lon, last_timestamp_str = last_location.split(",")
+                last_lat, last_lon = float(last_lat), float(last_lon)
+                last_timestamp = datetime.strptime(
+                    last_timestamp_str, "%Y-%m-%d %H:%M:%S"
+                )
 
-            if (
-                speed > 900
-            ):  # Speed greater than 900 km/h (faster than a passenger plane)
-                value["anomaly"] = "High speed detected"
-                yield value
+                time_diff = (
+                    timestamp - last_timestamp
+                ).total_seconds() / 3600  # in hours
+                distance = haversine(last_lat, last_lon, latitude, longitude)
+                speed = distance / time_diff
+                print(speed)
+                logging.info(f"Calculated speed for user_id={user_id} is {speed} km/h")
 
-        self.redis_client.set(
-            user_id, f"{latitude},{longitude},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
+                if (
+                    speed > 9
+                ):  # Speed greater than 900 km/h (faster than a passenger plane)
+                    value["anomaly"] = "High speed detected"
+                    yield value
+
+            self.redis_client.set(
+                user_id,
+                f"{latitude},{longitude},{timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
+            )
+        except Exception as e:
+            logging.error(f"Error processing element: {e}", exc_info=True)
 
 
 class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow]):
@@ -119,7 +135,16 @@ def main():
     env.add_jars("file:///app/flink-sql-connector-kafka-3.1.0-1.18.jar")
 
     input_type_info = Types.ROW_NAMED(
-        ["card_id", "user_id", "latitude", "longitude", "value", "limit", "timestamp"],
+        [
+            "card_id",
+            "user_id",
+            "latitude",
+            "longitude",
+            "value",
+            "limit",
+            "timestamp",
+            "anomaly",
+        ],
         [
             Types.INT(),
             Types.INT(),
@@ -127,6 +152,7 @@ def main():
             Types.DOUBLE(),
             Types.DOUBLE(),
             Types.DOUBLE(),
+            Types.STRING(),
             Types.STRING(),
         ],
     )
@@ -199,7 +225,7 @@ def main():
     kafka_sink = FlinkKafkaProducer(
         topic="Anomaly",
         serialization_schema=serialization_schema,
-        producer_config={"bootstrap.servers": "localhost:9092"},
+        producer_config={"bootstrap.servers": "kafka:9092"},
     )
 
     anomalies.add_sink(kafka_sink)

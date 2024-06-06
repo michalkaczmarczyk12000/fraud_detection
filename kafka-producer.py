@@ -16,9 +16,10 @@ producer = KafkaProducer(
 
 if __name__ == "__main__":
     num_of_cards = 10000
-    num_of_users = 7000
+    num_of_users = 3
     card_to_user_map = {
-        card_id: random.randint(0, num_of_users) for card_id in range(0, num_of_cards)
+        card_id: random.randint(0, num_of_users - 1)
+        for card_id in range(0, num_of_cards)
     }
     user_to_last_location_map = {
         user_id: rand_lat_long() for user_id in range(0, num_of_users)
@@ -29,7 +30,7 @@ if __name__ == "__main__":
     }
 
     while True:
-        card_id = random.randint(0, num_of_cards)
+        card_id = random.randint(0, num_of_cards - 1)
         card_limit = card_to_limit_map[card_id]
         user_id = card_to_user_map[card_id]
         user_location = user_to_last_location_map[user_id]
