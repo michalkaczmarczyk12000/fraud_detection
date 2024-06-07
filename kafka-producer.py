@@ -15,7 +15,7 @@ producer = KafkaProducer(
 )
 
 if __name__ == "__main__":
-    num_of_cards = 10000
+    num_of_cards = 3
     num_of_users = 3
     card_to_user_map = {
         card_id: random.randint(0, num_of_users - 1)

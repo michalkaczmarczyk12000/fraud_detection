@@ -29,12 +29,13 @@ from util import haversine
 class DetectLocationChange(KeyedProcessFunction):
 
     def open(self, runtime_context):
+        print(">open of DetectLocationChange")
         self.redis_host = os.getenv("REDIS_HOST", "localhost")
         self.redis_port = int(os.getenv("REDIS_PORT", 6379))
         self.redis_client = redis.StrictRedis(
             host=self.redis_host, port=self.redis_port, decode_responses=True
         )
-        logging.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}")
+        print(f"Connected to Redis at {self.redis_host}:{self.redis_port}")
 
     def process_element(self, value, ctx: "KeyedProcessFunction.Context"):
         try:
@@ -56,14 +57,14 @@ class DetectLocationChange(KeyedProcessFunction):
                 )
 
                 time_diff = (
-                    timestamp - last_timestamp
-                ).total_seconds() / 3600  # in hours
+                                    timestamp - last_timestamp
+                            ).total_seconds() / 3600  # in hours
                 distance = haversine(last_lat, last_lon, latitude, longitude)
                 speed = distance / time_diff
                 print(f"Calculated speed for user_id={user_id} is {speed} km/h")
 
                 if (
-                    speed > 900
+                        speed > 90  # 900
                 ):  # Speed greater than 900 km/h (faster than a passenger plane)
                     print("Anomaly detected")
                     value["anomaly"] = "High speed detected"
@@ -78,16 +79,52 @@ class DetectLocationChange(KeyedProcessFunction):
             print(f"Error processing element. ", e)
 
 
+class DetectTransactionValueChange(KeyedProcessFunction):
+
+    def open(self, runtime_context):
+        print(">open of DetectTransactionValueChange")
+        self.redis_host = os.getenv("REDIS_HOST", "localhost")
+        self.redis_port = int(os.getenv("REDIS_PORT", 6379))
+        self.redis_client = redis.StrictRedis(
+            host=self.redis_host, port=self.redis_port, decode_responses=True
+        )
+        logging.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}")
+
+    def process_element(self, value, ctx: "KeyedProcessFunction.Context"):
+        user_id = value["user_id"]
+        transaction_value = float(value["value"])
+        print("=====[START] Transaction value chage anomaly detection started=====")
+        print(f"Processing transaction for user_id={user_id}")
+
+        avg_key = f"{user_id}_avg_value"
+        avg_transaction_value = self.redis_client.get(avg_key)
+        if avg_transaction_value is None:
+            avg_transaction_value = 0.0
+        else:
+            avg_transaction_value = float(avg_transaction_value)
+
+        new_avg_value = (avg_transaction_value + transaction_value) / 2
+        print(f"New average transaction value for {user_id}: {new_avg_value}")
+
+        if transaction_value > 2 * avg_transaction_value:
+            print("Anomaly detected: Significant increase in transaction value")
+            value["anomaly"] = "Significant increase in transaction value"
+            yield value
+
+        self.redis_client.set(avg_key, new_avg_value)
+        print("=====[END] Transaction value chage anomaly detection started=====")
+
+
 class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow]):
     def process(
-        self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[Row]
+            self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[Row]
     ) -> Iterable[Row]:
         transactions = list(elements)
         print("=====[START] Frequent transactions anomaly detection =====")
         print(f"Processing transactions {transactions}")
         if len(transactions) > 3:
+            print("Anomaly detected")
             for transaction in transactions:
-                print("Anomaly detected")
                 transaction["anomaly"] = "High frequency of transactions"
                 yield transaction
         print("=====[END] Frequent transactions anomaly detection =====")
@@ -96,6 +133,7 @@ class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow
 class DetectLimitBreaches(KeyedProcessFunction):
 
     def open(self, runtime_context: RuntimeContext):
+        print(">open of DetectLimitBreaches")
         self.transactions_state = runtime_context.get_map_state(
             MapStateDescriptor(
                 "transactions_state", Types.LONG(), Types.PICKLED_BYTE_ARRAY()
@@ -118,14 +156,17 @@ class DetectLimitBreaches(KeyedProcessFunction):
             trans
             for trans in self.transactions_state.values()
             if trans["value"] > limit
-            and trans["timestamp"]
-            > (current_time - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
+               and trans["timestamp"]
+               > (current_time - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
         ]
+        print("TRANSACTION STATE keys:", self.transactions_state.keys())
+        print("TRANSACTION STATE values:", self.transactions_state.values())
+        print("over_limit_transactions:", over_limit_transactions)
         print("DEBUG2")
         if len(over_limit_transactions) >= 3:
             print("DEBUG3")
+            print("Anomaly detected")
             for trans in over_limit_transactions:
-                print("Anomaly detected")
                 trans["anomaly"] = "Limit breach detected"
                 yield trans
         print("=====[END] Card limit exceeded anomaly detection =====")
@@ -139,7 +180,8 @@ class DetectLimitBreaches(KeyedProcessFunction):
                 transaction = self.transactions_state.get(ts)
                 self.transactions_state.remove(ts)
                 print(f"removed {ts} form transactions_state")
-                yield transaction
+                # yield transaction
+        yield from []
 
 
 def main():
@@ -231,6 +273,10 @@ def main():
         DetectLimitBreaches(), output_type=output_type_info
     )
 
+    anomalies_value_change = ds.key_by(lambda row: row["user_id"]).process(
+        DetectTransactionValueChange(), output_type=output_type_info
+    )
+
     serialization_schema = (
         JsonRowSerializationSchema.builder()
         .with_type_info(type_info=output_type_info)
@@ -246,6 +292,7 @@ def main():
     anomalies_location.add_sink(kafka_sink)
     anomalies_frequent.add_sink(kafka_sink)
     anomalies_limit.add_sink(kafka_sink)
+    anomalies_value_change.add_sink(kafka_sink)
 
     env.execute("anomaly_detection")
 
