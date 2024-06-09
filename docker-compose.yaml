@@ -23,10 +23,6 @@ services:
 
   flink-jobmanager:
     image: flink:latest
-    environment:
-      - |
-        FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
     ports:
       - "8081:8081"
     command: jobmanager
