@@ -40,7 +40,7 @@ class TransactionMonitor:
         self.anomaly_count = 0
         self.fraud_counts = Counter()
         self.message_queue = queue.Queue()
-        self.last_two_transactions = deque(maxlen=2)
+        self.last_two_transactions = deque(maxlen=5)
 
         self.kafka_thread_transactions = KafkaConsumerThread(
             "Transaction", self.message_queue
@@ -76,9 +76,17 @@ class TransactionMonitor:
                 self.last_two_transactions.append(message)
 
     def update_table(self):
+        last_five_transactions = list(self.last_two_transactions)[-5:]
         table_data = [
-            [txn["card_id"], txn["user_id"], txn["value"], txn["limit"], txn["timestamp"], txn.get("anomaly", "N/A")]
-            for txn in self.last_two_transactions
+            [
+                txn["card_id"],
+                txn["user_id"],
+                f"{txn['value']:.2f}",
+                f"{txn['limit']:.2f}",
+                txn["timestamp"],
+                txn.get("anomaly", "N/A"),
+            ]
+            for txn in last_five_transactions
         ]
 
         self.ax3.clear()
@@ -95,7 +103,12 @@ class TransactionMonitor:
             anomaly = row[5]
             cell_color = "red" if anomaly != "N/A" else "green"
             for j in range(len(row)):
-                table[(i+1, j)].set_facecolor(cell_color)
+                table[(i + 1, j)].set_facecolor(cell_color)
+            for i, row in enumerate(table_data):
+                anomaly = row[5]
+                cell_color = "red" if anomaly != "N/A" else "green"
+                for j in range(len(row)):
+                    table[(i + 1, j)].set_facecolor(cell_color)
 
     def update_plots(self, _):
         self.process_messages()
