@@ -1,12 +1,12 @@
 import threading
 import json
-import plotly.graph_objects as go
-import dash
-from dash import dcc, html, Input, Output
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from collections import Counter
 from kafka import KafkaConsumer
 import queue
-from collections import Counter
-import time
+
+import numpy as np
 
 
 class KafkaConsumerThread(threading.Thread):
@@ -38,6 +38,7 @@ class TransactionMonitor:
     def __init__(self):
         self.transaction_counts = Counter()
         self.fraud_counts = Counter()
+
         self.message_queue = queue.Queue()
 
         self.kafka_thread_transactions = KafkaConsumerThread(
@@ -48,67 +49,23 @@ class TransactionMonitor:
         self.kafka_thread_transactions.start()
         self.kafka_thread_frauds.start()
 
-        self.app = dash.Dash(__name__)
-        self.app.layout = html.Div(
-            [
-                html.H1("Frauds Detection Analysis"),
-                dcc.Graph(id="transaction-bar-chart"),
-                dcc.Graph(id="fraud-bar-chart"),
-                html.Table(id="validation-table"),
-                dcc.Interval(
-                    id="interval-component",
-                    interval=1*1000,  # in milliseconds
-                    n_intervals=0
-                ),
-            ]
-        )
+        self.fig, (self.ax1, self.ax2, self.table) = plt.subplots(1, 3, figsize=(12, 8))
+        self.colors = plt.cm.tab20(np.linspace(0, 1, 40))
 
-        self.app.callback(
-            Output("transaction-bar-chart", "figure"),
-            Output("fraud-bar-chart", "figure"),
-            Output("validation-table", "children"),
-            Input("interval-component", "n_intervals")
-        )(self.update_plots)
+        self.ani = animation.FuncAnimation(self.fig, self.update_plots, interval=1000)
+        plt.tight_layout(pad=4.0)
+        plt.suptitle("Frauds Detection Analysis", fontsize=16)
+        plt.show()
 
     def process_messages(self):
         while not self.message_queue.empty():
             topic, message = self.message_queue.get()
+            print(message)
+            print(f"Processing message from topic {topic}: {message}")
             if topic == "Transaction":
                 self.transaction_counts[message["user_id"]] += 1
             elif topic == "Anomaly":
                 self.fraud_counts[message["anomaly"]] += 1
-
-    def update_plots(self, n):
-        self.process_messages()
-
-        transaction_fig = self.plot_transactions(self.transaction_counts, "Current Generated Transactions")
-        fraud_fig = self.plot_transactions(self.fraud_counts, "Detected Fraud Transactions")
-        validation_table = self.update_table()
-
-        return transaction_fig, fraud_fig, validation_table
-
-    def plot_transactions(self, counts, title):
-        transaction_types = list(counts.keys())
-        transaction_counts = list(counts.values())
-
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=transaction_types,
-                    y=transaction_counts,
-                    text=transaction_counts,
-                    textposition="auto"
-                )
-            ]
-        )
-
-        fig.update_layout(
-            title=title,
-            xaxis_title="Transaction Type",
-            yaxis_title="Count"
-        )
-
-        return fig
 
     def update_table(self):
         table_data = []
@@ -120,26 +77,27 @@ class TransactionMonitor:
             table_data.append([transaction_type, generated, detected, is_valid])
 
         if not table_data:
-            return []
+            return
 
-        header = [html.Tr([html.Th(col) for col in ["Type", "Generated", "Detected", "IsValid"]])]
-        rows = []
+        self.table.clear()
+        self.table.axis("off")
+        self.table.table(
+            cellText=table_data,
+            colLabels=["Type", "Generated", "Detected", "IsValid"],
+            loc="center",
+            cellLoc="center",
+        )
 
-        for row in table_data:
+        table = self.table.table(
+            cellText=table_data,
+            colLabels=["Type", "Generated", "Detected", "IsValid"],
+            loc="center",
+            cellLoc="center",
+        )
+        for i, row in enumerate(table_data):
             is_valid = row[3]
             cell_color = "green" if is_valid else "red"
-            rows.append(
-                html.Tr(
-                    [
-                        html.Td(row[0]),
-                        html.Td(row[1]),
-                        html.Td(row[2]),
-                        html.Td(row[3], style={"backgroundColor": cell_color})
-                    ]
-                )
-            )
-
-        return header + rows
+            table.get_celld()[(i + 1, 3)].set_facecolor(cell_color)
 
     def validate_transaction(self, transaction_type, generated, detected):
         if transaction_type == "LT":
@@ -150,18 +108,46 @@ class TransactionMonitor:
             return generated == detected
         return True
 
+    def update_plots(self, _):
+        self.process_messages()
+
+        self.ax1.clear()
+        self.ax2.clear()
+
+        self.plot_transactions(
+            self.ax1, self.transaction_counts, "Generated Transactions"
+        )
+        self.plot_transactions(
+            self.ax2, self.fraud_counts, "Anomaly Transactions"
+        )
+
+        self.update_table()
+
+    def plot_transactions(self, ax, counts, title):
+        transaction_types = list(counts.keys())
+        transaction_counts = list(counts.values())
+
+        bar_colors = [
+            self.colors[hash(t) % len(self.colors)] for t in transaction_types
+        ]
+
+        ax.bar(transaction_types, transaction_counts, color=bar_colors)
+        ax.set_title(title)
+        ax.set_xlabel("Transaction Type")
+        ax.set_ylabel("Count")
+
+        for i, count in enumerate(transaction_counts):
+            ax.text(i, count + 0.5, str(count), ha="center")
+
     def stop(self):
         self.kafka_thread_transactions.stop()
         self.kafka_thread_frauds.stop()
-
-    def run(self):
-        self.app.run_server(debug=True)
 
 
 if __name__ == "__main__":
     monitor = TransactionMonitor()
     try:
-        monitor.run()
+        plt.show()
     except KeyboardInterrupt:
         monitor.stop()
         print("Stopped monitoring.")
