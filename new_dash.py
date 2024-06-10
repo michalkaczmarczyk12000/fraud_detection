@@ -2,10 +2,9 @@ import threading
 import json
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from collections import Counter
+from collections import Counter, deque
 from kafka import KafkaConsumer
 import queue
-
 import numpy as np
 
 
@@ -38,8 +37,8 @@ class TransactionMonitor:
     def __init__(self):
         self.transaction_counts = Counter()
         self.fraud_counts = Counter()
-
         self.message_queue = queue.Queue()
+        self.last_two_transactions = deque(maxlen=2)
 
         self.kafka_thread_transactions = KafkaConsumerThread(
             "Transaction", self.message_queue
@@ -49,7 +48,7 @@ class TransactionMonitor:
         self.kafka_thread_transactions.start()
         self.kafka_thread_frauds.start()
 
-        self.fig, (self.ax1, self.ax2, self.table) = plt.subplots(1, 3, figsize=(12, 8))
+        self.fig, (self.ax1, self.ax2, self.ax3) = plt.subplots(1, 3, figsize=(18, 8))
         self.colors = plt.cm.tab20(np.linspace(0, 1, 40))
 
         self.ani = animation.FuncAnimation(self.fig, self.update_plots, interval=1000)
@@ -60,44 +59,42 @@ class TransactionMonitor:
     def process_messages(self):
         while not self.message_queue.empty():
             topic, message = self.message_queue.get()
-            print(message)
             print(f"Processing message from topic {topic}: {message}")
             if topic == "Transaction":
                 self.transaction_counts[message["user_id"]] += 1
+                self.last_two_transactions.append(message)
             elif topic == "Anomaly":
                 self.fraud_counts[message["anomaly"]] += 1
+                self.last_two_transactions.append(message)
 
     def update_table(self):
-        table_data = []
+        table_data = [
+            [
+                txn["card_id"],
+                txn["user_id"],
+                txn["value"],
+                txn["limit"],
+                txn["timestamp"],
+                txn.get("anomaly", "N/A"),
+            ]
+            for txn in self.last_two_transactions
+        ]
 
-        for transaction_type in self.transaction_counts:
-            generated = self.transaction_counts[transaction_type]
-            detected = self.fraud_counts[transaction_type]
-            is_valid = self.validate_transaction(transaction_type, generated, detected)
-            table_data.append([transaction_type, generated, detected, is_valid])
+        self.ax3.clear()
+        self.ax3.axis("off")
 
-        if not table_data:
-            return
-
-        self.table.clear()
-        self.table.axis("off")
-        self.table.table(
+        table = self.ax3.table(
             cellText=table_data,
-            colLabels=["Type", "Generated", "Detected", "IsValid"],
+            colLabels=["Card ID", "User ID", "Value", "Limit", "Timestamp", "Anomaly"],
             loc="center",
             cellLoc="center",
         )
 
-        table = self.table.table(
-            cellText=table_data,
-            colLabels=["Type", "Generated", "Detected", "IsValid"],
-            loc="center",
-            cellLoc="center",
-        )
         for i, row in enumerate(table_data):
-            is_valid = row[3]
-            cell_color = "green" if is_valid else "red"
-            table.get_celld()[(i + 1, 3)].set_facecolor(cell_color)
+            anomaly = row[5]
+            cell_color = "red" if anomaly != "N/A" else "green"
+            for j in range(len(row)):
+                table[(i + 1, j)].set_facecolor(cell_color)
 
     def validate_transaction(self, transaction_type, generated, detected):
         if transaction_type == "LT":
@@ -115,10 +112,10 @@ class TransactionMonitor:
         self.ax2.clear()
 
         self.plot_transactions(
-            self.ax1, self.transaction_counts, "Generated Transactions"
+            self.ax1, self.transaction_counts, "Current Generated Transactions"
         )
         self.plot_transactions(
-            self.ax2, self.fraud_counts, "Anomaly Transactions"
+            self.ax2, self.fraud_counts, "Detected Fraud Transactions"
         )
 
         self.update_table()
