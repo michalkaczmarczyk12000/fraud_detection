@@ -130,58 +130,30 @@ class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow
         print("=====[END] Frequent transactions anomaly detection =====")
 
 
-class DetectLimitBreaches(KeyedProcessFunction):
+class DetectLimitBreaches(ProcessWindowFunction):
 
-    def open(self, runtime_context: RuntimeContext):
-        print(">open of DetectLimitBreaches")
-        self.transactions_state = runtime_context.get_map_state(
-            MapStateDescriptor(
-                "transactions_state", Types.LONG(), Types.PICKLED_BYTE_ARRAY()
-            )
-        )
+    # def open(self, runtime_context: RuntimeContext):
+    #     print(">open of DetectLimitBreaches")
 
-    def process_element(self, value, ctx: "KeyedProcessFunction.Context"):
+    def process(self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[dict]) -> Iterable[dict]:
+        transactions = list(elements)
         print("=====[START] Card limit exceeded anomaly detection =====")
-        current_time = datetime.strptime(value["timestamp"], "%Y-%m-%d %H:%M:%S")
-        card_id = value["card_id"]
-        limit = float(value["limit"])
-        value_amount = float(value["value"])
-        print(f"Processing card {card_id}, limit {limit}, value {value_amount}")
+        print(f"Processing transactions: {transactions}")
 
-        self.transactions_state.put(ctx.timestamp(), value)
-        print("DEBUG0")
-        ctx.timer_service().register_event_time_timer(ctx.timestamp() + 60000)
-        print("DEBUG1")
-        over_limit_transactions = [
-            trans
-            for trans in self.transactions_state.values()
-            if trans["value"] > limit
-               and trans["timestamp"]
-               > (current_time - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
-        ]
-        print("TRANSACTION STATE keys:", self.transactions_state.keys())
-        print("TRANSACTION STATE values:", self.transactions_state.values())
-        print("over_limit_transactions:", over_limit_transactions)
-        print("DEBUG2")
+        # Pobierz limit dla karty
+        limit = float(transactions[0]["limit"])
+        print(f"limit = {limit}")
+        over_limit_transactions = [trans for trans in transactions if float(trans["value"]) > limit]
+
+        print(f"Transactions over the limit: {over_limit_transactions}")
+
         if len(over_limit_transactions) >= 3:
-            print("DEBUG3")
             print("Anomaly detected")
-            for trans in over_limit_transactions:
-                trans["anomaly"] = "Limit breach detected"
-                yield trans
-        print("=====[END] Card limit exceeded anomaly detection =====")
+            for transaction in over_limit_transactions:
+                transaction["anomaly"] = "Limit breach detected"
+                yield transaction
 
-    def on_timer(self, timestamp, ctx: "KeyedProcessFunction.OnTimerContext"):
-        print(">On timer<")
-        for ts in list(self.transactions_state.keys()):
-            print(f"Timestamp {ts}")
-            if ts <= timestamp:
-                print(f"{ts} <= {timestamp} == {ts <= timestamp}")
-                transaction = self.transactions_state.get(ts)
-                self.transactions_state.remove(ts)
-                print(f"removed {ts} form transactions_state")
-                # yield transaction
-        yield from []
+        print("=====[END] Card limit exceeded anomaly detection =====")
 
 
 def main():
@@ -269,8 +241,10 @@ def main():
         .process(DetectFrequentTransactions(), output_type=output_type_info)
     )
 
-    anomalies_limit = ds.key_by(lambda row: row["card_id"]).process(
-        DetectLimitBreaches(), output_type=output_type_info
+    anomalies_limit = (
+        ds.key_by(lambda row: row["card_id"])
+        .window(TumblingEventTimeWindows.of(Time.minutes(1)))
+        .process(DetectLimitBreaches(), output_type=output_type_info)
     )
 
     anomalies_value_change = ds.key_by(lambda row: row["user_id"]).process(

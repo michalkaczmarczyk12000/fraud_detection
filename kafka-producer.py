@@ -40,7 +40,7 @@ if __name__ == "__main__":
             "user_id": user_id,
             "latitude": new_location[0],
             "longitude": new_location[1],
-            "value": np.abs(np.random.normal(card_limit / 2, card_limit / 2)),
+            "value": np.abs(np.random.normal(card_limit, card_limit / 2)),
             "limit": card_limit,
             "timestamp": str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         }
