@@ -57,14 +57,14 @@ class DetectLocationChange(KeyedProcessFunction):
                 )
 
                 time_diff = (
-                                    timestamp - last_timestamp
-                            ).total_seconds() / 3600  # in hours
+                    timestamp - last_timestamp
+                ).total_seconds() / 3600  # in hours
                 distance = haversine(last_lat, last_lon, latitude, longitude)
                 speed = distance / time_diff
                 print(f"Calculated speed for user_id={user_id} is {speed} km/h")
 
                 if (
-                        speed > 90  # 900
+                    speed > 90  # 900
                 ):  # Speed greater than 900 km/h (faster than a passenger plane)
                     print("Anomaly detected")
                     value["anomaly"] = "High speed detected"
@@ -117,7 +117,7 @@ class DetectTransactionValueChange(KeyedProcessFunction):
 
 class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow]):
     def process(
-            self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[Row]
+        self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[Row]
     ) -> Iterable[Row]:
         transactions = list(elements)
         print("=====[START] Frequent transactions anomaly detection =====")
@@ -132,18 +132,18 @@ class DetectFrequentTransactions(ProcessWindowFunction[Row, Row, int, TimeWindow
 
 class DetectLimitBreaches(ProcessWindowFunction):
 
-    # def open(self, runtime_context: RuntimeContext):
-    #     print(">open of DetectLimitBreaches")
-
-    def process(self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[dict]) -> Iterable[dict]:
+    def process(
+        self, key: int, context: ProcessWindowFunction.Context, elements: Iterable[dict]
+    ) -> Iterable[dict]:
         transactions = list(elements)
         print("=====[START] Card limit exceeded anomaly detection =====")
         print(f"Processing transactions: {transactions}")
 
-        # Pobierz limit dla karty
         limit = float(transactions[0]["limit"])
         print(f"limit = {limit}")
-        over_limit_transactions = [trans for trans in transactions if float(trans["value"]) > limit]
+        over_limit_transactions = [
+            trans for trans in transactions if float(trans["value"]) > limit
+        ]
 
         print(f"Transactions over the limit: {over_limit_transactions}")
 

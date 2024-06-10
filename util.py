@@ -22,22 +22,18 @@ def rand_lat_long():
 
 
 def generate_random_point(latitude, longitude, radius):
-    # Convert radius from meters to degrees
+
     radius_in_degrees = radius / 111320
 
-    # Generate two random numbers
     u = random.random()
     v = random.random()
 
-    # Convert uniform random numbers to normal distribution
     w = radius_in_degrees * math.sqrt(u)
     t = 2 * math.pi * v
 
-    # Calculate the offset in latitude and longitude
     delta_latitude = w * math.cos(t)
     delta_longitude = w * math.sin(t) / math.cos(math.radians(latitude))
 
-    # Calculate the new latitude and longitude
     new_latitude = latitude + delta_latitude
     new_longitude = longitude + delta_longitude
 
@@ -47,7 +43,7 @@ def generate_random_point(latitude, longitude, radius):
 def haversine(lat1, lon1, lat2, lon2):
     from math import radians, sin, cos, sqrt, atan2
 
-    R = 6371  # Radius of the Earth in km
+    R = 6371
     d_lat = radians(lat2 - lat1)
     d_lon = radians(lon2 - lon1)
     a = (
